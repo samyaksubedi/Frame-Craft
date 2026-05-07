@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api")
     "/upload-headshot",
 )
 async def upload_headshot(file: UploadFile = File(...)):
+    print("Im here")
     contents = await file.read()
     url = upload_file(
         file_bytes=contents,
@@ -47,7 +48,9 @@ async def upload_headshot(file: UploadFile = File(...)):
 
 @router.post("/job", response_model=CreateJobResponse)
 async def create_jobs(
-    request: CreateJobRequest, session: Session = Depends(get_session)
+    request: CreateJobRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
 ):
     job = Job(
         prompt=request.prompt,
@@ -62,7 +65,7 @@ async def create_jobs(
     #  Fire and forget style generation
     session.commit()
     # asyncio.create_task(process_job(job.id))
-    BackgroundTasks.add_task(process_job, job.id)
+    background_tasks.add_task(process_job, job.id)
     return CreateJobResponse(job_id=job.id)
 
 

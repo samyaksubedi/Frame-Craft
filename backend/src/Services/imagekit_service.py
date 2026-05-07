@@ -1,32 +1,45 @@
-from imagekitio import ImageKit
-from Configs.env import IMAGEKIT_PRIVATE_KEY, IMAGEKIT_PUBLIC_KEY, IMAGEKIT_URL_ENDPOINT
+import cloudinary
+import cloudinary.uploader
+from Configs.env import (
+    # CLOUDINARY_URL,
+    CLOUDINARY_API_KEY,
+    CLOUDINARY_API_SECRET,
+    CLOUDINARY_CLOUD_NAME,
+)
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
+)
 
 
-imagekit = ImageKit(private_key=IMAGEKIT_PRIVATE_KEY)
-
-
-async def upload_file(
+def upload_file(
     file_bytes: bytes, file_name: str, folder: str, content_type: str = "image/png"
 ) -> str:
-    """Upload a file to ImageKit and return the CDN URL."""
-    result = await imagekit.files.upload(
-        file=(
-            file_bytes,
-            file_name,
-            content_type,
-        ),
-        file_name=file_name,
+    """Upload a file to Cloudinary and return the CDN URL."""
+    result = cloudinary.uploader.upload(
+        file_bytes,
         folder=folder,
-        is_private_file=False,
-        use_unique_file_name=True,
+        public_id=file_name,
+        overwrite=True,
+        resource_type="image",
     )
-    return result.url
+    return result["secure_url"]  # always use secure_url, not url
 
 
 def get_variants(base_url: str):
-    """Returns 3 sizes variant URL's using imagekit transformations."""
+    """Returns 3 size variant URLs using Cloudinary transformations."""
+    if not base_url:
+        return None
     return {
-        "youtube": f"{base_url}?tr=w-1280,h-720,c-maintain_ratio,fo-auto",
-        "shorts": f"{base_url}?tr=w-1080,h-1920,c-maintain_ratio,fo-auto",
-        "square": f"{base_url}?tr=w-1080,h-1080,c-maintain_ratio,fo-auto",
+        "youtube": base_url.replace(
+            "/upload/", "/upload/w_1280,h_720,c_fill,g_auto,q_auto,f_auto/"
+        ),
+        "shorts": base_url.replace(
+            "/upload/", "/upload/w_1080,h_1920,c_fill,g_auto,q_auto,f_auto/"
+        ),
+        "square": base_url.replace(
+            "/upload/", "/upload/w_1080,h_1080,c_fill,g_auto,q_auto,f_auto/"
+        ),
     }

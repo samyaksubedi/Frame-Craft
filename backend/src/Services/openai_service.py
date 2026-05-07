@@ -1,6 +1,8 @@
 from openai import AsyncOpenAI
 import base64
+
 from Configs.env import OPENAI_API_KEY
+
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -52,3 +54,16 @@ async def generate_thumbnail(prompt: str, style_prompt: str, headshot_url) -> by
 
         return base64.b64decode(image_base64)
     raise RuntimeError("No image generation result found in the response")
+
+
+# bytes = asyncio.run(
+#     generate_thumbnail(
+#         "Create a thumbnail about Learning FastAPI in One shot in super cool manner",
+#         "Create a clean, minimal YouTube thumbnail with bright lighting, "
+#         "white/light background, modern professional aesthetic, plenty of "
+#         "whitespace, and sharp clean composition. The person should look "
+#         "approachable and professional.",
+#         headshot_url="https://res.cloudinary.com/dilc2ybbs/image/upload/v1778153238/headshots/pexels-hiteshchoudhary-18264716.jpg.jpg",
+#     )
+# )
+# print("Bytes", bytes)

@@ -81,7 +81,7 @@ async def generate_one_thumbnail(thumbnail_id: str, prompt: str, headshot_url: s
         try:
             file_name = f"{thumbnail_id}.png"
             folder_path = f"thumbnails/{job_id}/"
-            url = await upload_file(
+            url = upload_file(
                 file_bytes=image_byte, file_name=file_name, folder=folder_path
             )
         except Exception as e:
@@ -147,8 +147,10 @@ async def process_job(job_id: str):
             return
 
         session.refresh(job)
+
         thumbnails = job.thumbnails
         all_failed = all(t.status == "failed" for t in thumbnails)
         job.status = "failed" if all_failed else "completed"
         session.commit()
         logger.info(f"Job {job_id} finished with status: {job.status}")
+        print(f"Job {job_id} finished with status: {job.status}")

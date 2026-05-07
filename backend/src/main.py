@@ -1,6 +1,6 @@
 import logging
 from fastapi import FastAPI
-from Routes import job_router
+from Routes.job_router import router as job_router
 from Configs.sql import create_tables
 from contextlib import asynccontextmanager
 
@@ -20,3 +20,4 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Youtube Thumbnail Generator", lifespan=lifespan)
+app.include_router(job_router)
