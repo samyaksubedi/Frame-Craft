@@ -30,9 +30,58 @@ STYLES = {
 }
 
 STYLE_ORDER = ["bold_dramatic", "clean_minimal", "vibrant_energetic"]
+INTERRUPTED_ERROR = "Generation was interrupted before it finished"
 
 
-async def generate_one_thumbnail(thumbnail_id: str, prompt: str, headshot_url: str):
+def _fail_thumbnail(thumbnail_id: str, message: str) -> None:
+    with Session(engine) as session:
+        thumbnail = session.get(Thumbnail, thumbnail_id)
+        if not thumbnail:
+            return
+        thumbnail.status = "failed"
+        thumbnail.error_message = message[:2000]
+        session.add(thumbnail)
+        session.commit()
+
+
+def recover_interrupted_jobs() -> None:
+    """Make persisted states honest after a process restart or old worker crash."""
+    with Session(engine) as session:
+        jobs = session.exec(select(Job)).all()
+        changed = False
+        for job in jobs:
+            thumbnails = session.exec(
+                select(Thumbnail).where(Thumbnail.job_id == job.id)
+            ).all()
+            non_terminal = [
+                thumbnail
+                for thumbnail in thumbnails
+                if thumbnail.status in {"pending", "generating"}
+            ]
+            if not non_terminal:
+                continue
+
+            for thumbnail in non_terminal:
+                thumbnail.status = "failed"
+                thumbnail.error_message = INTERRUPTED_ERROR
+                session.add(thumbnail)
+
+            job.status = (
+                "completed"
+                if any(thumbnail.status == "uploaded" for thumbnail in thumbnails)
+                else "failed"
+            )
+            session.add(job)
+            changed = True
+
+        if changed:
+            session.commit()
+            logger.warning("Recovered interrupted thumbnail generation records")
+
+
+async def generate_one_thumbnail(
+    thumbnail_id: str, prompt: str, headshot_url: str
+) -> bool:
     """
     Generate and upload a single thumbnail using AI.
 
@@ -45,112 +94,134 @@ async def generate_one_thumbnail(thumbnail_id: str, prompt: str, headshot_url: s
         prompt: User-provided description for the thumbnail.
         headshot_url: URL of the user's headshot to incorporate.
     """
-    with Session(engine) as session:
-        # 1. Thumbnail not found
-        thumbnail = session.get(Thumbnail, thumbnail_id)
-        if not thumbnail:
-            logger.error(f"Thumbnail {thumbnail_id} not found")
-            return
+    try:
+        with Session(engine) as session:
+            thumbnail = session.get(Thumbnail, thumbnail_id)
+            if not thumbnail:
+                logger.error("Thumbnail %s not found", thumbnail_id)
+                return False
 
-        thumbnail.status = "generating"
-        style_name = thumbnail.style_name
-        job_id = thumbnail.job_id
-        session.commit()
+            thumbnail.status = "generating"
+            thumbnail.error_message = None
+            style_name = thumbnail.style_name
+            job_id = thumbnail.job_id
+            session.add(thumbnail)
+            session.commit()
 
         style_prompt = STYLES.get(style_name)
         if not style_prompt:
-            logger.error(f"Unknown style: {style_name}")
-            thumbnail.status = "failed"
-            thumbnail.error = f"Unknown style: {style_name}"
-            session.commit()
-            return
+            message = f"Unknown style: {style_name}"
+            logger.error(message)
+            _fail_thumbnail(thumbnail_id, message)
+            return False
 
-        # 2. AI generation failed
         try:
-            image_byte = await generate_thumbnail(
-                prompt=prompt, style_prompt=style_prompt, headshot_url=headshot_url
+            image_bytes = await generate_thumbnail(
+                prompt=prompt,
+                style_prompt=style_prompt,
+                headshot_url=headshot_url,
             )
-        except Exception as e:
-            logger.error(f"Generation failed for {thumbnail_id}: {e}")
-            thumbnail.status = "failed"
-            thumbnail.error = str(e)
-            session.commit()
-            return
+        except Exception as exc:
+            logger.exception("Generation failed for thumbnail %s", thumbnail_id)
+            _fail_thumbnail(
+                thumbnail_id, "Image generation failed. Please try again."
+            )
+            return False
 
-        # 3. Upload failed
         try:
-            file_name = f"{thumbnail_id}.png"
-            folder_path = f"thumbnails/{job_id}/"
             url = upload_file(
-                file_bytes=image_byte, file_name=file_name, folder=folder_path
+                file_bytes=image_bytes,
+                file_name=thumbnail_id,
+                folder=f"thumbnails/{job_id}",
             )
-        except Exception as e:
-            logger.error(f"Upload failed for {thumbnail_id}: {e}")
-            thumbnail.status = "failed"
-            thumbnail.error = str(e)
-            session.commit()
-            return
+        except Exception as exc:
+            logger.exception("Upload failed for thumbnail %s", thumbnail_id)
+            _fail_thumbnail(
+                thumbnail_id, "Generated image upload failed. Please try again."
+            )
+            return False
 
-        # 4. All good
-        thumbnail.imagekit_url = url
-        thumbnail.status = "uploaded"
-        session.commit()
-        logger.info(f"Thumbnail {thumbnail_id} generated and uploaded successfully")
+        with Session(engine) as session:
+            thumbnail = session.get(Thumbnail, thumbnail_id)
+            if not thumbnail:
+                logger.error(
+                    "Thumbnail %s disappeared before upload completed", thumbnail_id
+                )
+                return False
+            thumbnail.imagekit_url = url
+            thumbnail.status = "uploaded"
+            thumbnail.error_message = None
+            session.add(thumbnail)
+            session.commit()
+
+        logger.info("Thumbnail %s generated and uploaded successfully", thumbnail_id)
+        return True
+    except Exception as exc:
+        logger.exception("Unexpected thumbnail worker failure for %s", thumbnail_id)
+        try:
+            _fail_thumbnail(
+                thumbnail_id, "Unexpected worker failure. Please try again."
+            )
+        except Exception:
+            logger.exception("Could not persist failure for thumbnail %s", thumbnail_id)
+        return False
 
 
 async def process_job(job_id: str):
-    # make job as processing
-    # find all thumbnails for this job
-    # start one worker for each thumbnail
-    # wait for all workers to finish
-    # mark job as completed / failed job
     with Session(engine) as session:
-        # 1. Job not found
         job = session.get(Job, job_id)
         if not job:
-            logger.error(f"Job {job_id} not found")
+            logger.error("Job %s not found", job_id)
             return
 
         job.status = "processing"
         prompt = job.prompt
         headshot_url = job.headshot_url
+        session.add(job)
         session.commit()
 
-        thumbnails = job.thumbnails
+        thumbnails = session.exec(
+            select(Thumbnail).where(Thumbnail.job_id == job_id)
+        ).all()
 
-        # 2. No thumbnails found
         if not thumbnails:
-            logger.error(f"No thumbnails found for job {job_id}")
+            logger.error("No thumbnails found for job %s", job_id)
             job.status = "failed"
+            session.add(job)
             session.commit()
             return
 
-        thumbnails_ids = [t.id for t in thumbnails]
-        tasks = [
-            generate_one_thumbnail(
-                headshot_url=headshot_url,
-                prompt=prompt,
-                thumbnail_id=tid,
-            )
-            for tid in thumbnails_ids
-        ]
+        thumbnail_ids = [thumbnail.id for thumbnail in thumbnails]
 
-        # 3. Unexpected worker crash
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.error(
-                f"Unexpected error during thumbnail generation for job {job_id}: {e}"
-            )
-            job.status = "failed"
-            session.commit()
+    tasks = [
+        generate_one_thumbnail(
+            headshot_url=headshot_url,
+            prompt=prompt,
+            thumbnail_id=thumbnail_id,
+        )
+        for thumbnail_id in thumbnail_ids
+    ]
+    await asyncio.gather(*tasks)
+
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        if not job:
+            logger.error("Job %s disappeared while processing", job_id)
             return
+        thumbnails = session.exec(
+            select(Thumbnail).where(Thumbnail.job_id == job_id)
+        ).all()
+        for thumbnail in thumbnails:
+            if thumbnail.status in {"pending", "generating"}:
+                thumbnail.status = "failed"
+                thumbnail.error_message = "Worker finished without a terminal result"
+                session.add(thumbnail)
 
-        session.refresh(job)
-
-        thumbnails = job.thumbnails
-        all_failed = all(t.status == "failed" for t in thumbnails)
-        job.status = "failed" if all_failed else "completed"
+        job.status = (
+            "completed"
+            if any(thumbnail.status == "uploaded" for thumbnail in thumbnails)
+            else "failed"
+        )
+        session.add(job)
         session.commit()
-        logger.info(f"Job {job_id} finished with status: {job.status}")
-        print(f"Job {job_id} finished with status: {job.status}")
+        logger.info("Job %s finished with status: %s", job_id, job.status)
