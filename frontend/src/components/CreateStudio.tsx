@@ -1,8 +1,5 @@
-"use client";
-/* eslint-disable @next/next/no-img-element -- local object URLs are not compatible with next/image */
-
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { ArrowUpRight, ImagePlus, LoaderCircle, X } from "lucide-react";
 import { createJob, uploadHeadshot } from "../lib/api";
 import { AppHeader } from "./AppHeader";
@@ -19,7 +16,7 @@ function validateFile(file: File): string | null {
 }
 
 export function CreateStudio() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -71,7 +68,7 @@ export function CreateStudio() {
       const headshotUrl = await uploadHeadshot(file);
       setStage("creating");
       const jobId = await createJob({ prompt: cleanPrompt, numThumbnails: count, headshotUrl });
-      router.push(`/jobs/${jobId}`);
+      navigate(`/jobs/${jobId}`);
     } catch (cause) {
       setError(
         cause instanceof Error

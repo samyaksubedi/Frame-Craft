@@ -1,9 +1,6 @@
-"use client";
-/* eslint-disable @next/next/no-img-element -- generated remote URLs are already transformed by Cloudinary */
-
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import {
   Check,
   Copy,
@@ -183,6 +180,15 @@ export function JobStudio({ jobId }: { jobId: string }) {
     },
   });
 
+  useEffect(() => {
+    if (jobQuery.data) {
+      document.title = `${jobQuery.data.prompt.slice(0, 54)} — Framecraft`;
+    }
+    return () => {
+      document.title = "Framecraft — YouTube Thumbnail Studio";
+    };
+  }, [jobQuery.data]);
+
   if (jobQuery.isPending) {
     return (
       <main className="site-shell results-shell">
@@ -202,7 +208,7 @@ export function JobStudio({ jobId }: { jobId: string }) {
           <p>{jobQuery.error instanceof Error ? jobQuery.error.message : "The project could not be loaded."}</p>
           <div className="error-actions">
             <button type="button" className="secondary-button" onClick={() => jobQuery.refetch()}><RotateCcw size={16} /> Try again</button>
-            <Link className="primary-button" href="/">Start a new project</Link>
+            <Link className="primary-button" to="/">Start a new project</Link>
           </div>
         </section>
       </main>
@@ -235,7 +241,7 @@ export function JobStudio({ jobId }: { jobId: string }) {
             </button>
           ))}
         </div>
-        <Link className="new-project-link" href="/">New project <ExternalLink size={14} /></Link>
+        <Link className="new-project-link" to="/">New project <ExternalLink size={14} /></Link>
       </section>
 
       <section className={`thumbnail-grid count-${job.thumbnails.length}`}>
@@ -245,7 +251,7 @@ export function JobStudio({ jobId }: { jobId: string }) {
       </section>
 
       {job.status === "failed" ? (
-        <div className="job-failure-note"><ImageOff size={18} /><div><strong>This project did not finish.</strong><p>Review the individual errors above or start again with a different brief.</p></div><Link href="/">Start over</Link></div>
+        <div className="job-failure-note"><ImageOff size={18} /><div><strong>This project did not finish.</strong><p>Review the individual errors above or start again with a different brief.</p></div><Link to="/">Start over</Link></div>
       ) : null}
 
       {preview ? <PreviewModal imageUrl={preview.imageUrl} title={`${preview.title} · ${selectedFormat.label}`} onClose={() => setPreview(null)} /> : null}

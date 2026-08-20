@@ -13,11 +13,6 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/.vinext/
-/out/
-
 # misc
 .DS_Store
 *.pem
@@ -36,6 +31,3 @@ yarn-error.log*
 .vercel
 
 /dist/
-/.wrangler/
-/outputs/
-/work/
